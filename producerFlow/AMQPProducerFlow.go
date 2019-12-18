@@ -4,27 +4,34 @@ import (
 	"fmt"
 	"log"
 	"math/rand"
+	"strconv"
 	"time"
 
 	"github.com/streadway/amqp"
 )
 
 type amqpProducerFlow struct {
-	watchQueueName string
-	flowQueueName  string
-	enabled        bool
-	threshold      int
-	delay          time.Duration
-	channel        *amqp.Channel
+	workQueueName    string
+	flowQueueName    string
+	enabled          bool
+	threshold        int
+	flowControlDelay time.Duration
+	normalDelay      time.Duration
+	currentDelay     time.Duration
+	workChannel      *amqp.Channel
+	flowChannel      *amqp.Channel
 }
 
-func newAMQPProducerFlow(watchQueue, flowExchange string, ch *amqp.Channel) amqpProducerFlow {
+func newAMQPProducerFlow(workQueue, flowQueue string, wch, fch *amqp.Channel) amqpProducerFlow {
 	return amqpProducerFlow{
-		watchQueueName: watchQueue,
-		flowQueueName:  flowExchange,
-		threshold:      10,
-		delay:          1000,
-		channel:        ch,
+		workQueueName:    workQueue,
+		flowQueueName:    flowQueue,
+		threshold:        10,
+		normalDelay:      300,
+		currentDelay:     300,
+		flowControlDelay: 5000,
+		workChannel:      wch,
+		flowChannel:      fch,
 	}
 }
 
@@ -35,15 +42,21 @@ func main() {
 	failOnError(err, "Failed to connect to RabbitMQ")
 	defer conn.Close()
 
-	ch, err := conn.Channel()
-	failOnError(err, "failed to create channel")
-	defer ch.Close()
+	wch, err := conn.Channel()
+	failOnError(err, "failed to create work channel")
+	defer wch.Close()
 
-	p := newAMQPProducerFlow("trade.eq.q", "flow.q", ch)
+	fch, err := conn.Channel()
+	failOnError(err, "failed to create flow control channel")
+	fch.Qos(1, 0, false)
+	defer wch.Close()
+
+	p := newAMQPProducerFlow("trade.eq.q", "flow.q", wch, fch)
 	p.run()
 }
 
 func (f *amqpProducerFlow) run() {
+	go f.flowControl()
 	for {
 		shares := rand.Intn(4000) + 1
 		text := fmt.Sprintf("BUY AAPL %d SHARES", shares)
@@ -54,9 +67,42 @@ func (f *amqpProducerFlow) run() {
 			Body:         []byte(text),
 		}
 		fmt.Printf("sending trade: %s\n", text)
-		err := f.channel.Publish("", f.watchQueueName, false, false, msg)
+		err := f.workChannel.Publish("", f.workQueueName, false, false, msg)
 		failOnError(err, "failed to publish message")
-		time.Sleep(f.delay * time.Millisecond)
+		time.Sleep(f.currentDelay * time.Millisecond)
+	}
+}
+
+func (f *amqpProducerFlow) flowControl() {
+	for {
+		m, _ := f.flowChannel.Consume(
+			f.flowQueueName,
+			"",
+			false,
+			false,
+			false,
+			false,
+			nil,
+		)
+		for {
+			d, more := <-m
+			if more {
+				msg, err := strconv.ParseBool(string(d.Body[:]))
+				if err != nil {
+					log.Fatal(err, "received malformed flow control message")
+				}
+				if msg {
+					fmt.Println("notification received to slow down...")
+					f.currentDelay = f.flowControlDelay
+				} else {
+					fmt.Println("system back to normal...")
+					f.currentDelay = f.normalDelay
+				}
+				f.flowChannel.Ack(d.DeliveryTag, false)
+			} else {
+				return
+			}
+		}
 	}
 }
 

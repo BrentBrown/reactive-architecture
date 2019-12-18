@@ -1,52 +1,41 @@
 package main
 
 import (
-	"context"
 	"fmt"
 	"time"
 
-	"github.com/BrentBrown/reactive-architecture/transport"
+	"github.com/streadway/amqp"
 )
 
 type AMQPConsumer struct {
+	queueName string
 }
 
-func NewConsumer() AMQPConsumer {
-	c := AMQPConsumer{}
+func NewConsumer(queueName string) AMQPConsumer {
+	c := AMQPConsumer{
+		queueName: queueName,
+	}
 	return c
 }
 
-func (c *AMQPConsumer) start(q transport.Queue, ctx context.Context) {
-	ch, err := q.Connection.Channel()
-	failOnError(err, "Failed to open a channel")
-	ch.Qos(1, 0, false)
-
+func (c *AMQPConsumer) start(ch *amqp.Channel) {
+	m, _ := ch.Consume(
+		c.queueName,
+		"",
+		false,
+		false,
+		false,
+		false,
+		nil,
+	)
 	for {
-		select {
-		case <-ctx.Done():
-			fmt.Println("cancel called")
-			err := ch.Close()
-			if err != nil {
-				fmt.Println(err)
-			}
+		d, more := <-m
+		if more {
+			fmt.Printf("message received: %s\n", string(d.Body[:]))
+			time.Sleep(2 * time.Second)
+			ch.Ack(d.DeliveryTag, false)
+		} else {
 			return
-		default:
-			m, err := ch.Consume(
-				q.QueueName,
-				"",
-				false,
-				false,
-				false,
-				false,
-				nil,
-			)
-			failOnError(err, "Consuming messages from Queue failed")
-
-			for delivery := range m {
-				fmt.Printf("message received: %s\n", string(delivery.Body[:]))
-				time.Sleep(2 * time.Second)
-				ch.Ack(delivery.DeliveryTag, false)
-			}
 		}
 	}
 }

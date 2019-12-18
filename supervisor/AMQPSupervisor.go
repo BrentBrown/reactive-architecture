@@ -1,75 +1,82 @@
 package main
 
 import (
-	"context"
 	"fmt"
 	"log"
 	"math"
 	"time"
 
-	"github.com/BrentBrown/reactive-architecture/transport"
+	"github.com/streadway/amqp"
 )
 
 type AMQPSupervisor struct {
-	consumers []func()
-	queue     transport.Queue
+	channels   []*amqp.Channel
+	connection *amqp.Connection
+	queueName  string
 }
 
-func NewSupervisor() AMQPSupervisor {
-	s := AMQPSupervisor{
-		consumers: make([]func(), 0, 0),
-		queue:     transport.NewQueue("trade.eq.q", "guest", "guest", "localhost", 5672),
+func NewSupervisor(queueName string, conn *amqp.Connection) AMQPSupervisor {
+	return AMQPSupervisor{
+		connection: conn,
+		channels:   make([]*amqp.Channel, 0, 1),
+		queueName:  queueName,
 	}
-	return s
 }
 
 func main() {
-	s := NewSupervisor()
+	url := fmt.Sprintf("amqp://%s:%s@%s:%d", "guest", "guest", "localhost", 5672)
+	conn, err := amqp.Dial(url)
+	failOnError(err, "Failed to connect to RabbitMQ")
+	defer conn.Close()
+
+	s := NewSupervisor("trade.eq.q", conn)
 	s.run()
 }
 
 func (s *AMQPSupervisor) run() {
 	fmt.Println("Starting supervisor")
-	ctx, cancel := context.WithCancel(context.Background())
+	ch, err := s.connection.Channel()
+	failOnError(err, "Supervisor failed to create a channel to RabbitMQ")
+	defer ch.Close()
 
-	s.startConsumer(ctx, cancel)
+	s.startConsumer()
 	for {
-		qi, err := s.queue.Channel.QueueInspect(s.queue.QueueName)
+		qi, err := ch.QueueInspect(s.queueName)
 		failOnError(err, "failed to inspect queue")
+
 		consumersNeeded := qi.Messages / 2
-		diff := math.Abs(float64(consumersNeeded - len(s.consumers)))
+		diff := math.Abs(float64(consumersNeeded - len(s.channels)))
 		for i := 0; i < int(diff); i++ {
-			if consumersNeeded > len(s.consumers) {
-				ctx2, cancel2 := context.WithCancel(ctx)
-				s.startConsumer(ctx2, cancel2)
+			if consumersNeeded > len(s.channels) {
+				s.startConsumer()
 			} else {
 				s.stopConsumer()
 			}
 		}
+
 		time.Sleep(1 * time.Second)
 	}
 }
 
-func (s *AMQPSupervisor) startConsumer(ctx context.Context, cancel func()) {
-	//	if len(s.consumers) == 0 {
+func (s *AMQPSupervisor) startConsumer() {
 	fmt.Println("Starting consumer...")
-	c := NewConsumer()
-	s.consumers = append(s.consumers, cancel)
+	c := NewConsumer(s.queueName)
+	ch, err := s.connection.Channel()
+	ch.Qos(1, 0, false)
+	failOnError(err, "failed to create channel")
+
+	s.channels = append(s.channels, ch)
 	go func() {
-		c.start(s.queue, ctx)
+		c.start(ch)
 	}()
-	//	}
 }
 
 func (s *AMQPSupervisor) stopConsumer() {
-	if len(s.consumers) > 1 {
+	if len(s.channels) > 1 {
 		fmt.Println("Removing consumer...")
-		cancel := s.consumers[0]
-		cancel()
-		s.consumers[0] = s.consumers[len(s.consumers)-1]
-		s.consumers[len(s.consumers)-1] = nil
-		s.consumers = s.consumers[:len(s.consumers)-1]
-		//s.consumers = append(s.consumers[:0], s.consumers[1:]...)
+		ch := s.channels[0]
+		ch.Close()
+		s.channels = append(s.channels[:0], s.channels[1:]...)
 	}
 }
 

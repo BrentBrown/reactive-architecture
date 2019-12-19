@@ -86,9 +86,8 @@ func (f *amqpProducerFlow) flowControl() {
 			d, more := <-m
 			if more {
 				msg, err := strconv.ParseBool(string(d.Body[:]))
-				if err != nil {
-					log.Fatal(err, "received malformed flow control message")
-				}
+				failOnError(err, "received malformed flow control message")
+
 				if msg {
 					fmt.Println("notification received to slow down...")
 					f.currentDelay = f.flowControlDelay
@@ -96,6 +95,7 @@ func (f *amqpProducerFlow) flowControl() {
 					fmt.Println("system back to normal...")
 					f.currentDelay = f.normalDelay
 				}
+
 				f.flowChannel.Ack(d.DeliveryTag, false)
 			} else {
 				return

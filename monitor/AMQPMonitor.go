@@ -21,8 +21,8 @@ func main() {
 
 	ch.ExchangeDeclare("flow.fx", "fanout", true, false, false, false, nil)
 	ch.QueueDeclare("flow.q", true, false, false, false, nil)
-	ch.QueueDeclare("trade.eq.q", true, false, false, false, nil)
 	ch.QueueBind("flow.q", "flow.q", "flow.fx", false, nil)
+	ch.QueueDeclare("trade.eq.q", true, false, false, false, nil)
 
 	for {
 		qi, err := ch.QueueInspect("trade.eq.q")

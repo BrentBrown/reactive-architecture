@@ -10,16 +10,20 @@ import (
 )
 
 type AMQPSupervisor struct {
-	channels   []*amqp.Channel
-	connection *amqp.Connection
-	queueName  string
+	channels     []*amqp.Channel
+	connection   *amqp.Connection
+	queueName    string
+	minConsumers int
+	maxConsumers int
 }
 
 func NewSupervisor(queueName string, conn *amqp.Connection) AMQPSupervisor {
 	return AMQPSupervisor{
-		connection: conn,
-		channels:   make([]*amqp.Channel, 0, 1),
-		queueName:  queueName,
+		connection:   conn,
+		channels:     make([]*amqp.Channel, 0, 800),
+		queueName:    queueName,
+		minConsumers: 1,
+		maxConsumers: 800,
 	}
 }
 
@@ -59,20 +63,22 @@ func (s *AMQPSupervisor) run() {
 }
 
 func (s *AMQPSupervisor) startConsumer() {
-	fmt.Println("Starting consumer...")
-	c := NewConsumer(s.queueName)
-	ch, err := s.connection.Channel()
-	ch.Qos(1, 0, false)
-	failOnError(err, "failed to create channel")
+	if len(s.channels) <= s.maxConsumers {
+		fmt.Println("Starting consumer...")
+		c := NewConsumer(s.queueName)
+		ch, err := s.connection.Channel()
+		ch.Qos(1, 0, false)
+		failOnError(err, "failed to create channel")
 
-	s.channels = append(s.channels, ch)
-	go func() {
-		c.start(ch)
-	}()
+		s.channels = append(s.channels, ch)
+		go func() {
+			c.start(ch)
+		}()
+	}
 }
 
 func (s *AMQPSupervisor) stopConsumer() {
-	if len(s.channels) > 1 {
+	if len(s.channels) > s.minConsumers {
 		fmt.Println("Removing consumer...")
 		ch := s.channels[0]
 		ch.Close()

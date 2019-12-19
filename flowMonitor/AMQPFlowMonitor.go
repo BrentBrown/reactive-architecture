@@ -21,7 +21,7 @@ func newAMQPFlowMonitor(watchQueue, flowExchange string, channel *amqp.Channel) 
 	return amqpFlowMonitor{
 		watchQueueName:   watchQueue,
 		flowExchangeName: flowExchange,
-		threshold:        10,
+		threshold:        125,
 		channel:          channel,
 	}
 }
@@ -53,7 +53,7 @@ func (f *amqpFlowMonitor) run() {
 			f.enabled = f.disableControlFlow()
 		}
 
-		time.Sleep(3 * time.Second)
+		time.Sleep(1 * time.Second)
 	}
 }
 

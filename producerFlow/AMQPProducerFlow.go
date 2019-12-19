@@ -14,7 +14,6 @@ type amqpProducerFlow struct {
 	workQueueName    string
 	flowQueueName    string
 	enabled          bool
-	threshold        int
 	flowControlDelay time.Duration
 	normalDelay      time.Duration
 	currentDelay     time.Duration
@@ -26,9 +25,8 @@ func newAMQPProducerFlow(workQueue, flowQueue string, wch, fch *amqp.Channel) am
 	return amqpProducerFlow{
 		workQueueName:    workQueue,
 		flowQueueName:    flowQueue,
-		threshold:        10,
-		normalDelay:      300,
-		currentDelay:     300,
+		normalDelay:      30,
+		currentDelay:     30,
 		flowControlDelay: 5000,
 		workChannel:      wch,
 		flowChannel:      fch,

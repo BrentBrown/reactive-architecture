@@ -9,22 +9,17 @@ import (
 	"github.com/streadway/amqp"
 )
 
-type amqpProducerFlow struct {
-	watchQueueName string
-	flowQueueName  string
-	enabled        bool
-	threshold      int
-	delay          time.Duration
-	channel        *amqp.Channel
+type amqpProducerNoFlow struct {
+	workQueueName string
+	delay         time.Duration
+	channel       *amqp.Channel
 }
 
-func newAMQPProducerNoFlow(watchQueue, flowExchange string, ch *amqp.Channel) amqpProducerFlow {
-	return amqpProducerFlow{
-		watchQueueName: watchQueue,
-		flowQueueName:  flowExchange,
-		threshold:      10,
-		delay:          1000,
-		channel:        ch,
+func newAMQPProducerNoFlow(workQueueName string, ch *amqp.Channel) amqpProducerNoFlow {
+	return amqpProducerNoFlow{
+		workQueueName: workQueueName,
+		delay:         1000,
+		channel:       ch,
 	}
 }
 
@@ -39,11 +34,11 @@ func main() {
 	failOnError(err, "failed to create channel")
 	defer ch.Close()
 
-	p := newAMQPProducerNoFlow("trade.eq.q", "flow.q", ch)
+	p := newAMQPProducerNoFlow("trade.eq.q", ch)
 	p.run()
 }
 
-func (f *amqpProducerFlow) run() {
+func (f *amqpProducerNoFlow) run() {
 	for {
 		shares := rand.Intn(4000) + 1
 		text := fmt.Sprintf("BUY AAPL %d SHARES", shares)
@@ -54,7 +49,7 @@ func (f *amqpProducerFlow) run() {
 			Body:         []byte(text),
 		}
 		fmt.Printf("sending trade: %s\n", text)
-		err := f.channel.Publish("", f.watchQueueName, false, false, msg)
+		err := f.channel.Publish("", f.workQueueName, false, false, msg)
 		failOnError(err, "failed to publish message")
 		time.Sleep(f.delay * time.Millisecond)
 	}
